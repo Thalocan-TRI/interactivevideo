@@ -2092,7 +2092,7 @@ define([
                             return;
                         }
                         isCompleted = true;
-                        fireConfetti();
+                        // fireConfetti();
                         Toast.add(M.util.get_string('congratulationsyoucompletethisactivity', 'mod_interactivevideo'), {
                             type: 'success',
                         });
