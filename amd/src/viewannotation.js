@@ -23,8 +23,10 @@
  */
 
 define([
-    'jquery', 'core/event_dispatcher', 'core/toast', 'mod_interactivevideo/quickform', 'mod_interactivevideo/libraries/jquery-ui'
-], function($, eventDispatcher, Toast, quickform) {
+    'jquery', 'core/str', 'core/event_dispatcher', 'core/toast', 'mod_interactivevideo/quickform',
+    'mod_interactivevideo/libraries/jquery-ui'
+], function($, str, eventDispatcher, Toast, quickform) {
+    const getString = str.get_string;
     const {dispatchEvent} = eventDispatcher;
     const ctRenderer = {};
     const isBS5 = $('body').hasClass('bs-5');
@@ -194,6 +196,14 @@ define([
 
     window.fireConfetti = fireConfetti;
 
+    // Preload audio.
+    const pop = new Audio(M.cfg.wwwroot + '/mod/interactivevideo/sounds/pop.mp3');
+    const point = new Audio(M.cfg.wwwroot + '/mod/interactivevideo/sounds/point-awarded.mp3');
+    window.IVAudio = {
+        pop,
+        point
+    };
+
     return {
         /**
          * Render annotation items on the video navigation and chapter list.
@@ -309,13 +319,14 @@ define([
              * @param {number} percentage
              * @returns {Promise<boolean>}
              */
-            const replaceProgressBars = (percentage) => {
+            const replaceProgressBars = async(percentage) => {
+                let livestring = await getString('live', 'mod_interactivevideo');
                 return new Promise((resolve) => {
                     percentage = percentage > 100 ? 100 : percentage;
                     let time = percentage / 100 * totaltime;
                     $currenttime.text(convertSecondsToHMS(time));
                     $remainingtime.text(
-                        player.live ? M.util.get_string('live', 'mod_interactivevideo') : convertSecondsToHMS(totaltime - time));
+                        player.live ? livestring : convertSecondsToHMS(totaltime - time));
                     $progressbar.css('width', percentage + '%');
                     $seekhead.css('left', percentage + '%');
                     $lightprogressbar.css('width', percentage + '%');
@@ -405,7 +416,7 @@ define([
                     releventAnnotations = getRelevantAnnotations(annotations, start, end, contentTypes);
                     window.ANNOS = releventAnnotations;
                     if (releventAnnotations.length > 0 && !releventAnnotations.find(x => x.type == 'chapter')) {
-                        prependDummyChapter(releventAnnotations, start, contentTypes);
+                        await prependDummyChapter(releventAnnotations, start, contentTypes);
                     }
 
                     await initializeContentTypeRenderers(contentTypes, releventAnnotations, player, interaction, course, userid,
@@ -530,11 +541,12 @@ define([
                  * @param {number} start - The timestamp at which the dummy chapter starts.
                  * @param {Array} contentTypes - The array of content types to find the chapter type from.
                  */
-                function prependDummyChapter(releventAnnotations, start, contentTypes) {
+                async function prependDummyChapter(releventAnnotations, start, contentTypes) {
+                    let startChapter = await getString('startchapter', 'mod_interactivevideo');
                     releventAnnotations.unshift({
                         id: 0,
-                        title: M.util.get_string('startchapter', 'mod_interactivevideo'),
-                        formattedtitle: M.util.get_string('startchapter', 'mod_interactivevideo'),
+                        title: startChapter,
+                        formattedtitle: startChapter,
                         timestamp: start,
                         type: 'chapter',
                         prop: JSON.stringify(contentTypes.find(x => x.name == 'chapter')),
@@ -591,14 +603,17 @@ define([
                                     iseditor,
                                     url
                                 });
-                                try {
-                                    ctRenderer[contentType.name].init();
-                                } catch (error) {
-                                    // Do nothing.
-                                }
                                 resolve();
                             });
                         });
+                    }));
+
+                    await Promise.all(contentTypes.map(async(contentType) => {
+                        try {
+                            await ctRenderer[contentType.name].init();
+                        } catch (error) {
+                            // Do nothing.
+                        }
                     }));
                 }
             };
@@ -648,13 +663,15 @@ define([
                 if (preventskip) {
                     const theAnnotations = releventAnnotations
                         .filter(x => Number(x.timestamp) < Number(annotation.timestamp)
-                            && x.completed == false && x.hascompletion == 1);
+                            && x.completed == false && x.hascompletion == 1 && x.timestamp >= start);
                     if (theAnnotations.length > 0) {
+                        // Sort by timestamp.
+                        theAnnotations.sort((a, b) => a.timestamp - b.timestamp); // Sort by timestamp.
                         const theAnnotation = theAnnotations[0];
-                        await player.pause();
-                        await player.seek(theAnnotation.timestamp);
-                        runInteraction(theAnnotation);
-                        Toast.add(M.util.get_string('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
+                        // Remove theAnnotation.id from the viewedAnno and run the interaction.
+                        viewedAnno = viewedAnno.filter(x => x != theAnnotation.id);
+                        await player.seek(theAnnotation.timestamp - 1);
+                        Toast.add(await getString('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
                             type: 'danger'
                         });
                         return;
@@ -753,7 +770,7 @@ define([
                         $changecaption.removeClass('d-none');
                         $changecaption.find('.dropdown-menu')
                             .html(`<a class="dropdown-item changecaption px-3" data-lang="" href="#">
-                     <i class="bi fa-fw bi-check"></i>${M.util.get_string('off', 'mod_interactivevideo')}</a>`);
+                     <i class="bi fa-fw bi-check"></i>${await getString('off', 'mod_interactivevideo')}</a>`);
                         let menu = '';
                         captions.forEach((caption, i) => {
                             menu += `<a class="dropdown-item changecaption text-white px-3"
@@ -889,7 +906,7 @@ define([
             const onReady = async(reloaded = false, main = false) => {
                 if ((window.braveEthereum || window.braveSolana) && !player.allowAutoplay) {
                     player.destroy();
-                    Toast.add(M.util.get_string('braveautoplay', 'mod_interactivevideo'), {
+                    Toast.add(await getString('braveautoplay', 'mod_interactivevideo'), {
                         type: 'danger',
                         autohide: false,
                     });
@@ -943,8 +960,8 @@ define([
                     // Remove the slash.
                     $currenttime.next().removeClass('d-md-inline');
                     $currenttime.removeClass('d-md-inline');
-                    $duration.text(M.util.get_string('live', 'mod_interactivevideo'));
-                    $remainingtime.text(M.util.get_string('live', 'mod_interactivevideo'));
+                    $duration.text(await getString('live', 'mod_interactivevideo'));
+                    $remainingtime.text(await getString('live', 'mod_interactivevideo'));
                     $taskinfo.addClass('no-pointer-events');
                     end = Number.MAX_SAFE_INTEGER;
                     // Progress 100%.
@@ -1020,7 +1037,7 @@ define([
                     return;
                 }
                 $('#playpause').find('i').removeClass('bi-pause-fill').addClass('bi-play-fill');
-                $('#playpause').attr('data-original-title', M.util.get_string('playtooltip', 'mod_interactivevideo'));
+                $('#playpause').attr('data-original-title', await getString('playtooltip', 'mod_interactivevideo'));
                 if (player.live) {
                     return;
                 }
@@ -1348,7 +1365,7 @@ define([
                 }
 
                 $('#playpause').find('i').removeClass('bi-play-fill').addClass('bi-pause-fill');
-                $('#playpause').attr('data-original-title', M.util.get_string('pausetooltip', 'mod_interactivevideo'));
+                $('#playpause').attr('data-original-title', await getString('pausetooltip', 'mod_interactivevideo'));
 
                 if ($('#message.active').length > 0) {
                     $('#message.active').each(function() {
@@ -1410,10 +1427,10 @@ define([
             let $toast = $('.toast-wrapper').detach();
             $wrapper.append($toast);
 
-            $(document).on('click', '.completion-required', function(e) {
+            $(document).on('click', '.completion-required', async function(e) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                Toast.add(M.util.get_string('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
+                Toast.add(await getString('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
                     type: 'danger'
                 });
                 return;
@@ -1428,13 +1445,17 @@ define([
                     return false;
                 }
                 if (releventAnnotations) {
-                    const theAnnotation = releventAnnotations.find(x => Number(x.timestamp) < Number(t.toFixed(2))
-                        && x.completed == false && JSON.parse(x.advanced || '{}').advskippable == 0 && x.hascompletion == 1);
-                    if (theAnnotation) {
-                        await player.pause();
-                        await player.seek(theAnnotation.timestamp);
-                        runInteraction(theAnnotation);
-                        Toast.add(M.util.get_string('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
+                    const theAnnotations = releventAnnotations.filter(x => Number(x.timestamp) < Number(t.toFixed(2))
+                        && x.completed == false && JSON.parse(x.advanced || '{}').advskippable == 0 && x.hascompletion == 1
+                        && x.timestamp >= start);
+                    if (theAnnotations.length > 0) {
+                        // Sort by timestamp.
+                        theAnnotations.sort((a, b) => a.timestamp - b.timestamp);
+                        const theAnnotation = theAnnotations[0];
+                        // Remove theAnnotation.id from the viewedAnno and run the interaction.
+                        viewedAnno = viewedAnno.filter(x => x != theAnnotation.id);
+                        await player.seek(theAnnotation.timestamp - 1);
+                        Toast.add(await getString('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
                             type: 'danger'
                         });
                         replaceProgressBars((theAnnotation.timestamp - start) / totaltime * 100);
@@ -1452,16 +1473,19 @@ define([
                 if (preventskip && releventAnnotations) {
                     // Check if there is any uncompleted activity before the current time.
                     const theAnnotations = releventAnnotations.filter(x => Number(x.timestamp) < Number(t.toFixed(2))
-                        && x.completed == false && x.hascompletion == 1);
+                        && x.completed == false && x.hascompletion == 1 && x.timestamp >= start);
                     if (theAnnotations.length > 0) {
+                        // Sort by timestamp.
+                        theAnnotations.sort((a, b) => a.timestamp - b.timestamp);
                         const theAnnotation = theAnnotations[0];
-                        await player.pause();
-                        await player.seek(theAnnotation.timestamp);
-                        runInteraction(theAnnotation);
-                        Toast.add(M.util.get_string('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
+                        // Remove theAnnotation.id from the viewedAnno and run the interaction.
+                        viewedAnno = viewedAnno.filter(x => x != theAnnotation.id);
+                        await player.seek(theAnnotation.timestamp - 1);
+                        Toast.add(await getString('youmustcompletethistaskfirst', 'mod_interactivevideo'), {
                             type: 'danger'
                         });
                         replaceProgressBars((theAnnotation.timestamp - start) / totaltime * 100);
+                        return;
                     }
                 }
                 handleUnskippable(t);
@@ -1480,7 +1504,7 @@ define([
             });
 
             // Handle video control events:: fullscreen toggle
-            $(document).on('click', '#fullscreen', function(e) {
+            $(document).on('click', '#fullscreen', async function(e) {
                 e.preventDefault();
                 if (!playerReady) {
                     return;
@@ -1501,7 +1525,7 @@ define([
                     } else if (elem.webkitEnterFullscreen) { /* IOS Safari */
                         elem.webkitEnterFullscreen();
                     } else {
-                        Toast.add(M.util.get_string('fullscreenisnotsupported', 'mod_interactivevideo'), {
+                        Toast.add(await getString('fullscreenisnotsupported', 'mod_interactivevideo'), {
                             type: 'danger'
                         });
                         // Remove the fullscreen button.
@@ -1575,7 +1599,7 @@ define([
                 shareurl = shareurl.replace(/&embed=1/g, '');
                 // Add shareurl to clipboard.
                 await navigator.clipboard.writeText(shareurl);
-                const copied = M.util.get_string('copiedtoclipboard', 'mod_interactivevideo');
+                const copied = await getString('copiedtoclipboard', 'mod_interactivevideo');
                 Toast.add(copied, {
                     type: 'success',
                     autohide: true,
@@ -1631,7 +1655,7 @@ define([
                 $loader.fadeIn(300);
                 if ($(this).hasClass('no-click')) {
                     // Add a tooltip that seeking is disabled.
-                    Toast.add(M.util.get_string('youcannotviewthisannotationyet', 'mod_interactivevideo'), {
+                    Toast.add(await getString('youcannotviewthisannotationyet', 'mod_interactivevideo'), {
                         type: 'danger'
                     });
                     return;
@@ -1669,7 +1693,7 @@ define([
                 e.stopImmediatePropagation();
                 if ($videoNav.hasClass('no-click')) {
                     // Add a tooltip that seeking is disabled.
-                    Toast.add(M.util.get_string('seekingdisabled', 'mod_interactivevideo'), {
+                    Toast.add(await getString('seekingdisabled', 'mod_interactivevideo'), {
                         type: 'danger'
                     });
                     return;
@@ -1762,7 +1786,7 @@ define([
 
             $(document).on('iv:playerStarted', async function() {
                 $('#playpause').find('i').removeClass('bi-play-fill').addClass('bi-pause-fill');
-                $('#playpause').attr('data-original-title', M.util.get_string('pausetooltip', 'mod_interactivevideo'));
+                $('#playpause').attr('data-original-title', await getString('pausetooltip', 'mod_interactivevideo'));
             });
 
             $(document).on('click', '#playpause', async function(e) {
@@ -1831,16 +1855,16 @@ define([
             }
 
             // Handle video control events:: mute/unmute
-            $(document).on('click', '#mute', function(e) {
+            $(document).on('click', '#mute', async function(e) {
                 e.preventDefault();
                 $(this).tooltip('hide');
                 $(this).toggleClass('active');
                 if ($(this).hasClass('active')) {
                     player.mute();
-                    $(this).attr('data-original-title', M.util.get_string('unmutetooltip', 'mod_interactivevideo'));
+                    $(this).attr('data-original-title', await getString('unmutetooltip', 'mod_interactivevideo'));
                 } else {
                     player.unMute();
-                    $(this).attr('data-original-title', M.util.get_string('mutetooltip', 'mod_interactivevideo'));
+                    $(this).attr('data-original-title', await getString('mutetooltip', 'mod_interactivevideo'));
                 }
                 $(this).find('i').toggleClass('bi-volume-mute bi-volume-up');
                 $(this).tooltip('show');
@@ -1955,7 +1979,7 @@ define([
                     onLoaded(reloaded, e);
                 });
 
-                $(document).on('iv:playerError', function() {
+                $(document).on('iv:playerError', async function() {
                     $annotationcanvas.removeClass('d-none w-0');
                     $startscreen.addClass('d-none');
                     $('.video-block').addClass('no-pointer bg-transparent');
@@ -1966,7 +1990,7 @@ define([
                         <img src="${M.cfg.wwwroot}/mod/interactivevideo/pix/404-error.png" alt="Error" class="w-25">
                         </div>`);
                     } else {
-                        Toast.add(M.util.get_string('thereisanissueloadingvideo', 'mod_interactivevideo'), {
+                        Toast.add(await getString('thereisanissueloadingvideo', 'mod_interactivevideo'), {
                             type: 'danger'
                         });
                     }
@@ -2096,7 +2120,7 @@ define([
                 window.ANNOS = windowAnnos;
             });
 
-            $(document).on('completionupdated', function(e) {
+            $(document).on('completionupdated', async function(e) {
                 let overallcomplete = JSON.parse(e.originalEvent.detail.response).overallcomplete;
                 if (overallcomplete) {
                     if (JSON.parse(e.originalEvent.detail.response).overallcomplete > 0) {
@@ -2104,8 +2128,8 @@ define([
                             return;
                         }
                         isCompleted = true;
-                        // fireConfetti();
-                        Toast.add(M.util.get_string('congratulationsyoucompletethisactivity', 'mod_interactivevideo'), {
+                        fireConfetti();
+                        Toast.add(await getString('congratulationsyoucompletethisactivity', 'mod_interactivevideo'), {
                             type: 'success',
                         });
                         $('#completiondropdown').html(`<i class="fs-25px bi bi-check-circle-fill text-success"></i>`);
@@ -2155,13 +2179,13 @@ define([
                 }
             });
 
-            $(document).on('iv:autoplayBlocked', function(e) {
+            $(document).on('iv:autoplayBlocked', async function(e) {
                 e.preventDefault();
                 if (e.originalEvent.detail.requireVideoBlock === false) {
                     $('.video-block').remove();
                 }
 
-                Toast.add(M.util.get_string('autoplayblocked', 'mod_interactivevideo'), {
+                Toast.add(await getString('autoplayblocked', 'mod_interactivevideo'), {
                     type: 'default',
                     autohide: true,
                     delay: 5000,
