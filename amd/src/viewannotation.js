@@ -2128,7 +2128,7 @@ define([
                             return;
                         }
                         isCompleted = true;
-                        fireConfetti();
+                        // fireConfetti();
                         Toast.add(await getString('congratulationsyoucompletethisactivity', 'mod_interactivevideo'), {
                             type: 'success',
                         });
