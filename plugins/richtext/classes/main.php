@@ -31,6 +31,32 @@ class main {
     }
 
     /**
+     * Default advanced settings for flexbook.
+     * @return array
+     */
+    public function flexbook_advanced() {
+        return [
+            'hideheader' => '0',
+            'deletebeforecomplete' => '0',
+            'deleteaftercomplete' => '0',
+            'visiblebeforecompleted' => '1',
+            'visibleaftercompleted' => '1',
+            'clickablebeforecompleted' => '1',
+            'clickableaftercompleted' => '1',
+            'rerunbeforecompleted' => '0',
+            'rerunaftercompleted' => '0',
+            'removeaftercompletion' => '0',
+            'removeafteractivitycompletion' => '0',
+            'preventskip' => '0',
+            'locked' => '0',
+            'jumptopass' => '',
+            'jumptofail' => '',
+            'backto' => '',
+            'jumpto' => '',
+        ];
+    }
+
+    /**
      * Check if the richtext can be used.
      * @return bool True if the richtext can be used, false otherwise.
      */
@@ -72,7 +98,27 @@ class main {
             'fbdescription' => get_string('richtextdescription', 'ivplugin_richtext'),
             'fbamdmodule' => 'ivplugin_richtext/fbmain',
             'fbform' => 'ivplugin_richtext\\fbform',
+            'dndextensions' => ['txt'],
+            'component' => 'ivplugin_richtext',
         ];
+    }
+
+    /**
+     * Create a new interaction instance.
+     *
+     * @param array $data The data for the new instance.
+     * @return \stdClass The newly created interaction record.
+     */
+    public function create_instance($data) {
+        global $DB;
+        $data = (object) $data;
+        if (empty($data->advanced)) {
+            $data->advanced = $this->flexbook_advanced();
+            $data->advanced['savecurrentstate'] = 0;
+            $data->advanced = json_encode($data->advanced);
+        }
+        $data->id = $DB->insert_record('flexbook_items', $data);
+        return \mod_flexbook\util::get_item($data->id, $data->contextid);
     }
 
     /**
