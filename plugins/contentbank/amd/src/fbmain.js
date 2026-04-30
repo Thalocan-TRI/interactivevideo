@@ -26,12 +26,33 @@ import $ from 'jquery';
 import contentbankutil from 'ivplugin_contentbank/util';
 import ModalForm from 'core_form/modalform';
 import Base from 'mod_flexbook/type/base';
-import {notifyFilterContentUpdated as notifyFilter} from 'core_filters/events';
 import Notification from 'core/notification';
 import {get_string as getString} from 'core/str';
 import state from 'mod_flexbook/state';
+import {safeParse} from 'mod_flexbook/utils';
 
 export default class ContentBank extends Base {
+    /**
+     * Creates an instance of the content bank class.
+     * @param {Array} annotations The annotations object
+     * @param {Object} properties Properties of the interaction type
+     */
+    constructor(annotations, properties) {
+        super(annotations, properties);
+        $(document).on('interactionrun', (e) => {
+            const annotation = e.originalEvent.detail.annotation;
+            if (annotation.type === 'contentbank') {
+                setTimeout(() => {
+                    window.dispatchEvent(new Event('resize'));
+                    const iframe = document.querySelector(`#message[data-id='${annotation.id}'] iframe`);
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.dispatchEvent(new Event('resize'));
+                    }
+                }, 1000);
+            }
+        });
+    }
+
     /**
      * Called when the edit form is loaded.
      * @param {Object} form The form object
@@ -85,36 +106,33 @@ export default class ContentBank extends Base {
             uploadForm.show();
         });
 
-        self.timepicker({
-            modal: true,
-            disablelist: true,
-            required: true,
-        });
-
         return {form, event};
     }
 
     /** @override */
     async postContentRender(annotation, $message, callback) {
-        let self = this;
         $message.addClass('hascontentbank');
         if (annotation.completiontracking !== 'view') {
-            const tooltipAttr = self.isBS5 ? 'data-bs' : 'data';
             $message.find('#title .info').remove();
             $message.find('#completiontoggle').before(
                 `<i class="bi bi-info-circle-fill iv-mr-2 info"
-                    ${tooltipAttr}-toggle="tooltip"
-                    ${tooltipAttr}-placement="auto"
-                    ${tooltipAttr}-container="#message"
-                    ${tooltipAttr}-trigger="hover"
                     title="${await getString("completionon" + annotation.completiontracking, "mod_interactivevideo")}">
                 </i>`
             );
 
             if (!annotation.completed) {
-                const tooltip = $message.find(`#title .info[${tooltipAttr}-toggle="tooltip"]`);
-                setTimeout(() => tooltip.tooltip('show'), 1000);
-                setTimeout(() => tooltip.tooltip('hide'), 3000);
+                const $tooltip = $message.find('#title .info');
+                $tooltip.tooltip('dispose');
+                setTimeout(function() {
+                    $tooltip.tooltip({
+                        container: $message,
+                        html: true,
+                        trigger: 'hover',
+                        placement: 'auto'
+                    });
+                    $tooltip.tooltip('show');
+                    setTimeout(() => $tooltip.tooltip('hide'), 3000);
+                }, 1000);
             }
         }
         if (annotation.hascompletion == 1
@@ -170,36 +188,8 @@ export default class ContentBank extends Base {
 
         let annoid = annotation.id;
 
-        const onPassFail = async(passed, time) => {
-            let label = passed ? 'continue' : 'rewatch';
-            $message.find('#content')
-                .append(`<button class="btn btn-${passed ? 'success' : 'danger'} mt-2 btn-rounded"
-                    id="passfail" data-timestamp="${time}"><i class="fa fa-${passed ? 'play' : 'redo'} iv-mr-2"></i>
-                ${await getString(label, 'ivplugin_contentbank')}
-                </button>`);
-            $message.find('iframe').addClass('no-pointer-events');
-        };
-
-        $(document).off('click', '#passfail').on('click', '#passfail', function(e) {
-            e.preventDefault();
-            let time = $(this).data('timestamp');
-            $message.find('.interaction-dismiss')
-                .addClass('force-dismiss')
-                .trigger('click');
-            self.player.seek(time);
-            self.player.play();
-            $(this).remove();
-        });
-
-        let saveState = 0;
-        let condition = null;
-        if (annotation.text1 != '' && annotation.text1 !== null) {
-            condition = JSON.parse(annotation.text1);
-        }
-
-        if (JSON.parse(annotation.advanced).savecurrentstate == 1) {
-            saveState = 1;
-        }
+        const advanced = safeParse(annotation.advanced, {});
+        const saveState = advanced.savecurrentstate == 1 ? 1 : 0;
 
         const afterLog = async(log) => {
             const xAPICheck = (annotation) => {
@@ -238,13 +228,26 @@ export default class ContentBank extends Base {
                         }
                         window.H5PIntegration.contents[id].contentUserData[0].state = log;
                         window.H5P = H5P;
-                        if (annotation.completed && !condition) {
-                            return;
-                        }
                         try {
                             H5P.externalDispatcher.off('xAPI');
                             H5P.externalDispatcher.on('xAPI', async function(event) {
                                 let statement = event.data.statement;
+                                if (!self.isEditMode() && state.isMascotActive
+                                    && statement.verb.id == 'http://adlnet.gov/expapi/verbs/answered') {
+                                    // Get the score result
+                                    let result = statement.result;
+                                    // Check if the score is greater than or equal to 0.5
+                                    if (result && result.success === true) {
+                                        // Dispatch iv:correct
+                                        self.dispatchEvent('iv:correct');
+                                    } else if (result && result.success === false) {
+                                        // Dispatch iv:incorrect
+                                        self.dispatchEvent('iv:incorrect');
+                                    }
+                                }
+                                if (annotation.completed) {
+                                    return;
+                                }
                                 if ((statement.verb.id == 'http://adlnet.gov/expapi/verbs/completed'
                                     || statement.verb.id == 'http://adlnet.gov/expapi/verbs/answered')
                                     && statement.object.id.indexOf('subContentId') < 0
@@ -256,7 +259,7 @@ export default class ContentBank extends Base {
                                                     <i class="fa fa-check iv-mr-2"></i>
                                                     ${await getString('xapieventdetected', 'ivplugin_contentbank')}
                                                     </div>`);
-                                        window.IVAudio.pop.play();
+                                        state.audio.pop.play();
                                         return;
                                     }
                                     let complete = false;
@@ -304,51 +307,22 @@ export default class ContentBank extends Base {
                                         }, 1500);
                                     }
 
-                                    if (condition !== null) {
-                                        if (result.score.scaled < 0.5) {
-                                            if (condition.gotoonfailed == 1 && condition.forceonfailed != 1) {
-                                                onPassFail(false, condition.timeonfailed);
-                                            } else if (condition.gotoonfailed == 1 && condition.forceonfailed == 1) {
-                                                setTimeout(function() {
-                                                    // Close the annotation.
-                                                    $message.find('.interaction-dismiss')
-                                                        .addClass('force-dismiss')
-                                                        .trigger('click');
-                                                    self.player.seek(condition.timeonfailed);
-                                                    self.player.play();
-                                                }, 1000);
-                                            }
-                                            if (condition.showtextonfailed == 1 && condition.textonfailed.text != '') {
-                                                let textonfailed = await self.formatContent(condition.textonfailed.text);
-                                                $message.find('.passfail-message').remove();
-                                                $message.find(`#content`)
-                                                    .prepend(`<div class="alert bg-light mt-2 mx-3 passfail-message">
-                                            ${textonfailed}</div>`);
-                                                notifyFilter($('.passfail-message'));
-                                            }
-                                        } else {
-                                            if (condition.gotoonpassing == 1 && condition.forceonpassing != 1) {
-                                                onPassFail(true, condition.timeonpassing);
-                                            } else if (condition.gotoonpassing == 1 && condition.forceonpassing == 1) {
-                                                setTimeout(function() {
-                                                    $message.find('.interaction-dismiss')
-                                                        .addClass('force-dismiss')
-                                                        .trigger('click');
-                                                    self.player.seek(condition.timeonpassing);
-                                                    self.player.play();
-                                                }, 1000);
-                                            }
-                                            if (condition.showtextonpassing == 1 && condition.textonpassing.text != '') {
-                                                let textonpassing = await self.formatContent(condition.textonpassing.text);
-                                                $message.find('.passfail-message').remove();
-                                                $message.find(`#content`)
-                                                    .prepend(`<div class="alert bg-light mt-2 mx-3 passfail-message">
-                                            ${textonpassing}</div>`);
-                                                notifyFilter($('.passfail-message'));
-                                            }
+                                    const advanced = safeParse(annotation.advanced, {});
+                                    if (result.score.scaled < 0.5) {
+                                        if (advanced.jumptofail) {
+                                            setTimeout(function() {
+                                                state.navigateToAnnotation(advanced.jumptofail, true);
+                                            }, 1000);
+                                        }
+                                    } else {
+                                        if (advanced.jumptopass) {
+                                            setTimeout(function() {
+                                                state.navigateToAnnotation(advanced.jumptopass, true);
+                                            }, 1000);
                                         }
                                     }
                                 }
+
                             });
                         } catch (e) {
                             requestAnimationFrame(detectH5P);

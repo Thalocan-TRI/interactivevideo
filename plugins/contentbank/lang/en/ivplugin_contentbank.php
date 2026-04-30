@@ -39,6 +39,7 @@ $string['force'] = 'Force';
 $string['gotosegment_desc'] = 'If checked, the learner will be presented with an option to go back to a time in the video that you specify below when the grade is below 50%. If "Force" is selected, the video will automatically jump to the specified time.';
 $string['gotosegmentpassing_desc'] = 'If checked, the learner will be presented with an option to go back to a time in the video that you specify below when the grade is more than or equal to 50%. If "Force" is selected, the video will automatically jump to the specified time.';
 $string['gototimestamp'] = 'Go to a specific timestamp';
+$string['invalidcontentid'] = 'The selected Content Bank item is invalid or not found.';
 $string['nocontentfound'] = 'No contents found.';
 $string['onfailedgrade'] = 'When receive a failing grade';
 $string['onpassinggrade'] = 'When receive a passing grade';
